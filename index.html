@@ -124,11 +124,27 @@ select:focus,input:focus{outline:none;border-color:var(--pink2);box-shadow:0 0 0
 }
 .back:active{transform:scale(.94)}
 
-/* ---------- Summary ---------- */
-.sumline{display:flex;gap:10px;padding:11px 0;border-bottom:1px solid rgba(255,255,255,.08);font-size:15px;align-items:flex-start}
-.sumline:last-child{border-bottom:0}
-.sumline .k{color:var(--dim);flex:none;font-size:13px;text-transform:uppercase;letter-spacing:.08em;font-weight:700;width:96px;padding-top:2px}
-.sumline .v{flex:1;font-weight:600;line-height:1.4}
+/* ---------- Summary / ticket ---------- */
+.ticketwrap{
+  position:relative;border-radius:24px;overflow:hidden;
+  box-shadow:0 22px 60px rgba(0,0,0,.5), 0 0 0 1px var(--line);
+  animation:pop .6s cubic-bezier(.2,1.2,.3,1) both;
+}
+@keyframes pop{from{opacity:0;transform:translateY(24px) scale(.92) rotate(-1.5deg)}to{opacity:1;transform:none}}
+#s5 .scroll{display:flex;flex-direction:column}
+.ticketwrap{margin:auto;max-width:100%}
+.ticketwrap img{display:block;width:100%;height:auto}
+.ticketwrap::after{
+  content:"";position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(115deg,transparent 35%,rgba(255,255,255,.16) 48%,transparent 60%);
+  transform:translateX(-120%);animation:sheen 1.5s .5s ease-out both;
+}
+@keyframes sheen{to{transform:translateX(120%)}}
+.ghost{
+  background:transparent;border:1px solid var(--line);color:var(--dim);
+  padding:12px;border-radius:999px;font-size:14px;font-weight:600;font-family:inherit;width:100%;
+}
+.ghost:active{transform:scale(.97)}
 .snap{
   width:100%;background:#FFFC00;color:#000;border:0;padding:18px;border-radius:999px;
   font-size:19px;font-weight:900;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:10px;
@@ -222,12 +238,13 @@ select:focus,input:focus{outline:none;border-color:var(--pink2);box-shadow:0 0 0
     <div class="scroll">
       <div class="step">Step 4 of 4</div>
       <h1>It's a <span class="grad">date</span> 🥰</h1>
-      <p class="sub">Send it to me and it's locked in.</p>
-      <div class="card" id="summary"></div>
+      <p class="sub">Here's your card — send it over and it's official.</p>
+      <div class="ticketwrap"><img id="ticketImg" alt="Your date card"></div>
     </div>
-    <div class="foot" style="flex-direction:column;gap:10px">
-      <button class="snap" id="snapBtn"><span style="font-size:22px">👻</span> Send on Snapchat</button>
-      <div class="tiny" id="snapNote">Copies your plan &amp; opens Snapchat — just paste it to me.</div>
+    <div class="foot" style="flex-direction:column;gap:8px">
+      <button class="snap" id="snapBtn"><span style="font-size:22px">👻</span> Send it on Snapchat</button>
+      <button class="ghost" id="saveBtn">Save the image instead</button>
+      <div class="tiny" id="snapNote">Tap send, then choose Snapchat 👻</div>
     </div>
   </section>
 
@@ -479,17 +496,218 @@ function dateStr(){
   return d.toLocaleDateString("en-GB",{weekday:"long"}) + " " + d.getDate() + __nth(d.getDate()) +
          " " + MONTHS[d.getMonth()] + " " + d.getFullYear();
 }
-function buildSummary(){
-  const box = $("#summary");
-  const rows = [["When", dateStr()], ["Time", S.time]];
-  ALL.filter(a=>S.acts.includes(a.id)).forEach(a=>{
-    rows.push([a.name, S.notes[a.id] ? a.ic+" "+S.notes[a.id] : a.ic+" (her choice)"]);
+const FONT = '-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",Roboto,"Helvetica Neue",sans-serif';
+
+/* draws the shareable card and returns the canvas */
+function makeCard(){
+  const W = 1080;
+  const c = document.createElement("canvas");
+  const g = c.getContext("2d");
+  const f = (w,s) => g.font = w + " " + s + "px " + FONT;
+
+  const M = 46, PAD = M + 60, IW = W - PAD*2;
+  const items = ALL.filter(a => S.acts.includes(a.id));
+  const extra = S.notes.__extra;
+  const d = S.date || new Date();
+  const dateLine = d.getDate() + __nth(d.getDate()) + " " + MONTHS[d.getMonth()] + " " + d.getFullYear();
+
+  /* ---- pass 1: geometry (measurements don't depend on canvas height) ---- */
+  let ds = 92; f("800", ds);
+  while(g.measureText(dateLine).width > IW && ds > 48){ ds -= 4; f("800", ds); }
+  const ty  = 300 + ds + 100;          // time pill
+  const dy  = ty + 130;                // divider
+  const top = dy + 116;                // list starts
+
+  const nameS = 44, noteS = 34, gap = 30;
+  const compact = items.length > 7;          // lots picked → one tight line each
+  const listH = kk => {
+    let h = 0;
+    items.forEach(a=>{
+      const ns = Math.round(nameS*kk);
+      if(compact){ h += ns + Math.round(gap*kk*0.72); return; }
+      h += ns + 14;
+      const note = S.notes[a.id];
+      if(note){
+        f("400", Math.round(noteS*kk));
+        h += wrapLines(g, note, IW - 76).length * Math.round(noteS*kk*1.35);
+      }
+      h += Math.round(gap*kk);
+    });
+    if(extra){ f("400", Math.round(noteS*kk)); h += 30 + wrapLines(g,'"'+extra+'"', IW-40).length * Math.round(noteS*kk*1.35); }
+    return h;
+  };
+  const FOOT = 250;
+  let k = 1;
+  let H = top + listH(1) + FOOT;
+  if(H > 1920){                               // shrink a bit, then let the card grow taller
+    k = Math.max(.74, (1920 - FOOT - top) / listH(1));
+    H = Math.min(2600, top + listH(k) + FOOT);
+  }
+  H = Math.round(Math.max(1500, H));
+  // nudge the list down so it sits nicely in the leftover room
+  const slack = Math.max(0, (H - FOOT - top - listH(k)) * 0.4);
+
+  c.width = W; c.height = H;
+
+  /* background */
+  let bg = g.createLinearGradient(0, 0, W*0.4, H);
+  bg.addColorStop(0,"#1a0620"); bg.addColorStop(.5,"#2b0a35"); bg.addColorStop(1,"#3d0d3f");
+  g.fillStyle = bg; g.fillRect(0,0,W,H);
+  const glow = (x,y,r,col) => {
+    const rg = g.createRadialGradient(x,y,0,x,y,r);
+    rg.addColorStop(0,col); rg.addColorStop(1,"rgba(0,0,0,0)");
+    g.fillStyle = rg; g.fillRect(0,0,W,H);
+  };
+  glow(W*0.5, -60, 900, "rgba(160,30,140,.55)");
+  glow(0, H, 800, "rgba(255,77,148,.20)");
+  glow(W, H*0.35, 700, "rgba(176,107,255,.14)");
+
+  /* scattered hearts */
+  g.save();
+  [[90,.16,54,.10],[980,.25,44,.09],[130,.51,40,.08],[960,.60,60,.09],
+   [70,.81,46,.08],[930,.91,42,.09],[520,.06,34,.07],[300,.95,38,.07]]
+   .forEach(([x,yr,s,a],i)=>{
+     g.globalAlpha = a; f("400", s);
+     g.fillText(["💖","✨","💕","💘","💗","✨","💞","💖"][i], x, H*yr);
+   });
+  g.restore();
+
+  /* card frame */
+  roundRect(g, M, M, W-M*2, H-M*2, 54);
+  g.fillStyle = "rgba(255,255,255,.055)"; g.fill();
+  g.strokeStyle = "rgba(255,255,255,.16)"; g.lineWidth = 2; g.stroke();
+
+  const CX = W/2;
+  g.textAlign = "center"; g.textBaseline = "alphabetic";
+
+  /* header */
+  f("800", 40);
+  tracked(g, "SHE SAID YES", CX, 190, 10, "#ffd36e");
+  f("400", 46); g.fillStyle = "#fff";
+  g.fillText("💖", CX - textW(g,"SHE SAID YES",10)/2 - 46, 192);
+  g.fillText("💖", CX + textW(g,"SHE SAID YES",10)/2 + 46, 192);
+
+  /* date block */
+  f("600", 44); g.fillStyle = "rgba(255,255,255,.62)";
+  g.fillText(d.toLocaleDateString("en-GB",{weekday:"long"}), CX, 300);
+
+  f("800", ds);
+  const dg = g.createLinearGradient(CX-IW/2, 0, CX+IW/2, 0);
+  dg.addColorStop(0,"#ff7ab8"); dg.addColorStop(1,"#ffd36e");
+  g.fillStyle = dg; g.fillText(dateLine, CX, 300 + ds + 24);
+
+  /* time pill */
+  f("700", 40);
+  const tLabel = "⏰  " + S.time, tw = g.measureText(tLabel).width + 64;
+  roundRect(g, CX - tw/2, ty, tw, 76, 38);
+  g.fillStyle = "rgba(255,77,148,.28)"; g.fill();
+  g.strokeStyle = "rgba(255,122,184,.6)"; g.lineWidth = 2; g.stroke();
+  g.fillStyle = "#fff"; g.fillText(tLabel, CX, ty + 52);
+
+  /* divider */
+  g.strokeStyle = "rgba(255,255,255,.14)"; g.lineWidth = 2;
+  g.beginPath(); g.moveTo(PAD, dy); g.lineTo(W-PAD, dy); g.stroke();
+
+  /* activity list */
+  f("800", 30);
+  tracked(g, "WE'RE DOING", CX, dy + 66, 8, "rgba(255,255,255,.55)");
+
+  let y = top + slack;
+  g.textAlign = "left";
+  items.forEach(a=>{
+    const ns = Math.round(nameS*k);
+    f("400", ns); g.fillStyle = "#fff";
+    g.fillText(a.ic, PAD, y + ns);
+
+    if(compact){                       // emoji · name — note, all on one line
+      f("700", ns); g.fillStyle = "#fff";
+      const nx = PAD + ns + 22;
+      g.fillText(a.name, nx, y + ns);
+      const note = S.notes[a.id];
+      if(note){
+        const zs = Math.round(noteS*k*0.92);
+        const sx = nx + g.measureText(a.name).width + 16;
+        f("400", zs); g.fillStyle = "rgba(255,255,255,.58)";
+        g.fillText(ellipsis(g, "— " + note, W - PAD - sx), sx, y + ns);
+      }
+      y += ns + Math.round(gap*k*0.72);
+      return;
+    }
+
+    f("700", ns);
+    g.fillStyle = "#fff";
+    g.fillText(a.name, PAD + ns + 22, y + ns);
+    y += ns + 14;
+    const note = S.notes[a.id];
+    if(note){
+      const zs = Math.round(noteS*k);
+      f("400", zs); g.fillStyle = "rgba(255,255,255,.60)";
+      wrapLines(g, note, IW - 76).forEach(line=>{
+        g.fillText(line, PAD + ns + 22, y + zs);
+        y += Math.round(zs*1.35);
+      });
+    }
+    y += Math.round(gap*k);
   });
-  if(S.notes.__extra) rows.push(["PS", S.notes.__extra]);
-  box.innerHTML = rows.map(([k,v])=>
-    `<div class="sumline"><div class="k">${k}</div><div class="v">${esc(v)}</div></div>`).join("");
+
+  if(extra){
+    const zs = Math.round(noteS*k);
+    y += 10; f("400", zs); g.fillStyle = "rgba(255,211,110,.85)";
+    g.textAlign = "center";
+    wrapLines(g, '"'+extra+'"', IW-40).forEach(line=>{
+      g.fillText(line, CX, y + zs); y += Math.round(zs*1.35);
+    });
+  }
+
+  /* footer */
+  g.textAlign = "center";
+  f("800", 54); g.fillStyle = "#fff";
+  g.fillText("It's a date 🥰", CX, H - 150);
+  f("600", 26); g.fillStyle = "rgba(255,255,255,.38)";
+  tracked(g, "MADE WITH LOVE, FOR YOU", CX, H - 100, 6, "rgba(255,255,255,.38)");
+
+  return c;
 }
-const esc = s => String(s).replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function roundRect(g,x,y,w,h,r){
+  g.beginPath();
+  g.moveTo(x+r,y); g.arcTo(x+w,y,x+w,y+h,r); g.arcTo(x+w,y+h,x,y+h,r);
+  g.arcTo(x,y+h,x,y,r); g.arcTo(x,y,x+w,y,r); g.closePath();
+}
+function textW(g,str,track){
+  return g.measureText(str).width + track*(str.length-1);
+}
+function tracked(g,str,cx,y,track,col){
+  const total = textW(g,str,track);
+  let x = cx - total/2;
+  const prev = g.textAlign; g.textAlign = "left"; g.fillStyle = col;
+  for(const ch of str){ g.fillText(ch,x,y); x += g.measureText(ch).width + track; }
+  g.textAlign = prev;
+}
+function ellipsis(g,str,maxW){
+  if(g.measureText(str).width <= maxW) return str;
+  let s = str;
+  while(s.length > 1 && g.measureText(s+"…").width > maxW) s = s.slice(0,-1);
+  return s.trimEnd() + "…";
+}
+function wrapLines(g,str,maxW){
+  const words = String(str).split(/\s+/), out = [];
+  let line = "";
+  for(const w of words){
+    const t = line ? line+" "+w : w;
+    if(g.measureText(t).width > maxW && line){ out.push(line); line = w; }
+    else line = t;
+  }
+  if(line) out.push(line);
+  return out.slice(0,3);
+}
+function buildSummary(){
+  const c = makeCard();
+  S.card = c;
+  $("#ticketImg").src = c.toDataURL("image/png");
+  // size the preview so the whole card is visible without scrolling
+  const h = (window.visualViewport ? visualViewport.height : innerHeight);
+  $(".ticketwrap").style.maxWidth = Math.round(h * 0.60 * (c.width / c.height)) + "px";
+}
 
 function planText(){
   const L = ["💖 SHE SAID YES 💖", "", "📅 " + dateStr(), "⏰ " + S.time, "", "We're doing:"];
@@ -514,19 +732,44 @@ async function copy(txt){
     ta.remove(); return ok;
   }
 }
-$("#snapBtn").addEventListener("click", async ()=>{
-  const txt = planText();
-  buzz([15,40,15]);
-  const ok = await copy(txt);
-  toast(ok ? "Copied! Paste it to me 👻" : "Screenshot this & send it 👻");
+const cardBlob = () => new Promise(res => (S.card || makeCard()).toBlob(res, "image/png"));
 
-  // iPhone: native share sheet → pick Snapchat and it carries the text over.
-  if(navigator.share){
-    try{ await navigator.share({text:txt}); return; }catch(e){ /* cancelled → fall through */ }
+function saveImage(blob){
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "our-date.png";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
+}
+
+$("#snapBtn").addEventListener("click", async ()=>{
+  buzz([15,40,15]);
+  const blob = await cardBlob();
+  const file = new File([blob], "our-date.png", {type:"image/png"});
+
+  // iPhone: share sheet with the image → tap Snapchat and it sends as a picture.
+  if(navigator.canShare && navigator.canShare({files:[file]})){
+    try{
+      await navigator.share({files:[file], text:"It's a date 🥰"});
+      toast("Sent! 💖");
+      return;
+    }catch(e){
+      if(e && e.name === "AbortError") return;   // she cancelled — don't nag
+    }
   }
+
+  // fallback: save the picture, copy the text, open Snapchat
+  saveImage(blob);
+  await copy(planText());
+  toast("Image saved — send it on Snapchat 👻");
   const url = SNAP_USERNAME ? "https://snapchat.com/add/"+SNAP_USERNAME : "snapchat://";
-  setTimeout(()=>{ location.href = url; }, 700);
-  setTimeout(()=>{ if(!document.hidden) location.href = "https://www.snapchat.com/"; }, 2200);
+  setTimeout(()=>{ location.href = url; }, 1200);
+});
+
+$("#saveBtn").addEventListener("click", async ()=>{
+  buzz(12);
+  saveImage(await cardBlob());
+  toast("Saved to your photos 📸");
 });
 
 /* back buttons */
